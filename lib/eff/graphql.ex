@@ -7,10 +7,36 @@ defmodule Eff.GraphQL do
   @base_delay_ms 200
 
   @doc """
-  Creates a new GraphQL client map.
+  Starts a named Finch pool for connection reuse.
+
+  Options:
+    * `:pool_size` — max connections per pool (default 256)
+    * `:pool_count` — number of pools (default 1)
   """
-  def new_client(endpoint, headers \\ %{}) do
-    %{endpoint: endpoint, headers: headers}
+  def start_pool(name \\ __MODULE__.Finch, opts \\ []) do
+    pool_size = Keyword.get(opts, :pool_size, 256)
+    pool_count = Keyword.get(opts, :pool_count, 1)
+
+    Finch.start_link(
+      name: name,
+      pools: %{
+        default: [
+          size: pool_size,
+          count: pool_count,
+          conn_opts: [transport_opts: [timeout: 30_000]]
+        ]
+      }
+    )
+  end
+
+  @doc """
+  Creates a new GraphQL client map.
+
+  Options:
+    * `:finch` — a started Finch process name for connection pooling
+  """
+  def new_client(endpoint, headers \\ %{}, opts \\ []) do
+    %{endpoint: endpoint, headers: headers, finch: Keyword.get(opts, :finch)}
   end
 
   @doc """
@@ -61,13 +87,27 @@ defmodule Eff.GraphQL do
         client.headers
       )
 
-    case Req.post(client.endpoint,
-           body: body,
-           headers: headers,
-           retry: false,
-           connect_options: [timeout: 30_000],
-           receive_timeout: 30_000
-         ) do
+    opts =
+      if client[:finch] do
+        [
+          body: body,
+          headers: headers,
+          retry: false,
+          finch: client.finch,
+          pool_timeout: 60_000,
+          receive_timeout: 30_000
+        ]
+      else
+        [
+          body: body,
+          headers: headers,
+          retry: false,
+          connect_options: [timeout: 30_000],
+          receive_timeout: 30_000
+        ]
+      end
+
+    case Req.post(client.endpoint, opts) do
       {:ok, %{status: 200, body: %{"data" => _data, "errors" => errors}}} when is_list(errors) ->
         {:error, {:graphql_errors, errors}}
 

@@ -6,6 +6,7 @@ defmodule TwispTest do
   @moduletag timeout: 300_000
 
   setup_all do
+    {:ok, _} = GraphQL.start_pool()
     {:ok, twisp} = Twisp.start()
 
     on_exit(fn -> Twisp.cleanup(twisp) end)
@@ -14,9 +15,11 @@ defmodule TwispTest do
   end
 
   defp new_client(twisp) do
-    GraphQL.new_client(twisp.graphql_endpoint, %{
-      "x-twisp-account-id" => UUID.uuid4()
-    })
+    GraphQL.new_client(
+      twisp.graphql_endpoint,
+      %{"x-twisp-account-id" => UUID.uuid4()},
+      finch: GraphQL.Finch
+    )
   end
 
   defp run_scenario(twisp) do
